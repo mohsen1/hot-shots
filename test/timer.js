@@ -1,5 +1,7 @@
 'use strict';
 
+var execSync = require('child_process').execSync;
+var StatsD = require('../lib/statsd');
 var assert = require('assert');
 
 var createStatsdClient = require('./helpers').createStatsdClient;
@@ -22,7 +24,7 @@ module.exports = function runTimerTestSuite() {
           it('should send stat and time to execute to timing function', function (done) {
             server = createUDPServer(function (address) {
               statsd = createStatsdClient({
-                host: address.address, 
+                host: address.address,
                 port: address.port
               }, index);
               var testFn = function (a, b) {
@@ -42,7 +44,7 @@ module.exports = function runTimerTestSuite() {
           it('should send data with tags to timing function', function (done) {
             server = createUDPServer(function (address) {
               statsd = createStatsdClient({
-                host: address.address, 
+                host: address.address,
                 port: address.port
               }, index);
               var testFn = function (a, b) {
@@ -64,7 +66,7 @@ module.exports = function runTimerTestSuite() {
           it('should send stat and time to execute to timing function', function (done) {
             server = createTCPServer(function (address) {
               statsd = createStatsdClient({
-                host: address.address, 
+                host: address.address,
                 port: address.port,
                 protocol: 'tcp'
               }, index);
@@ -85,7 +87,7 @@ module.exports = function runTimerTestSuite() {
           it('should send data with tags to timing function', function (done) {
             server = createTCPServer(function (address) {
               statsd = createStatsdClient({
-                host: address.address, 
+                host: address.address,
                 port: address.port,
                 protocol: 'tcp'
               }, index);
@@ -105,5 +107,49 @@ module.exports = function runTimerTestSuite() {
         });
       });
     });
+
+    it('should record "real" time of function call', function () {
+      var statsd = new StatsD({mock:true});
+      var instrumented = statsd.timer(sleep(100), 'blah');
+
+      instrumented();
+
+      var timeFromStatLine = statsd.mockBuffer[0].match(/blah:(\d+\.\d+)\|/)[1];
+
+      assert.ok(timeFromStatLine >= 100);
+      assert.ok(timeFromStatLine < 200);
+    });
+
+    it('should record "user time" of promise', function () {
+      /* globals Promise */
+      var statsd = new StatsD({mock:true});
+
+      var onehundredMsFunc = function () { return delay(100); };
+
+      var instrumented = statsd.asyncTimer(onehundredMsFunc, 'name-thingy');
+
+      return instrumented().then(function() {
+
+        var stat = statsd.mockBuffer[0];
+        var name = stat.split(/:|\|/)[0];
+        var time = stat.split(/:|\|/)[1];
+
+        assert.equal(name, 'name-thingy');
+        assert.ok(parseFloat(time) >= 100);
+        assert.ok(parseFloat(time) < 200);
+      });
+    });
   });
 };
+
+function sleep(ms) {
+  return function () {
+    execSync('sleep ' + (ms / 1000));
+  };
+}
+
+function delay(n) {
+  return new Promise(function (resolve, reject) {
+    setTimeout(resolve, n);
+  });
+}
